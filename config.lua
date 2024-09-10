@@ -12,6 +12,7 @@ Config.RemoveBBQ = {
 }
 
 Config.MaxPlacementDistance = 5.0 --max distance from player bbq can be before unable to place
+
 Config.Controls = {
     Rotate = {
         ['bbqrotateleft'] = { --do not change
@@ -77,15 +78,18 @@ Config.Items = {
         },
     },
 }
+
 Config.Emotes = {
     Cooking = 'bbq',
     PlaceBBQ = 'mechanic4',
     Refuel = 'mechanic4',
 }
+
 Config.Timings = {
     PlaceBBQ = 5, -- in seconds
     Refuel = 10,
 }
+
 Config.EnableFuelSystem = true
 Config.ShowItemImages = true
 Config.EnableBBQShop = true
@@ -95,10 +99,12 @@ Config.ShopBlips = {
     Colour = 3,
     Label = "BBQ Shop",
 }
+
 Config.ShopLocations = {
     ['southside'] = {Coords = vector4(53.06, -1479.82, 29.27, 181.97),PedModel = 'a_f_m_eastsa_02'},
     ['paleto'] = {Coords = vector4(-122.97, 6389.65, 32.18, 46.03),PedModel = 'a_f_m_eastsa_02'},
 }
+
 Config.Shop = { --change prices to your economy
     ['bbqs'] = { --this is the category (you can add more)
         Label = "BBQs", --category label

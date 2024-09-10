@@ -3,11 +3,11 @@ local BBQOUT = {}
 local SharedItems = QBCore.Shared.Items
 
 AddEventHandler('onResourceStop', function(t) if t ~= GetCurrentResourceName() then return end
-    for k, v in pairs(BBQOUT) do 
-        if DoesEntityExist(v.entity) then
-            DeleteEntity(v.entity) 
-        end
-    end
+    -- for k, v in pairs(BBQOUT) do 
+    --     if DoesEntityExist(v.entity) then
+    --         DeleteEntity(v.entity) 
+    --     end
+    -- end
 end)
 
 function DebugCode(msg)
@@ -72,50 +72,55 @@ RegisterNetEvent('sayer-bbq:RemoveItem', function(item, amount)
     TriggerClientEvent('inventory:client:ItemBox', source, SharedItems[item], "remove")
 end)
 
-RegisterNetEvent('sayer-bbq:CheckForBBQs', function()
-    local bbqs = MySQL.query.await('SELECT * FROM sayer_bbq', {})
-    for _, v in pairs(bbqs) do
-        local item = v.item
-        DebugCode("item:"..item)
-        local citizenid = v.citizenid
-        DebugCode("citizenid:"..citizenid)
-        local fuel = json.decode(v.fuel)
-        local fuelcurrent = fuel.Current
-        DebugCode("fuelcurrent:"..tostring(fuelcurrent))
-        local fuelmax = fuel.Max
-        DebugCode("fuelmax:"..tostring(fuelmax))
-        if fuelcurrent > fuelmax then
-            fuelcurrent = fuelmax
-        end
-        if fuelcurrent < 0 then
-            fuelcurrent = 0
-        end
-        local coords = json.decode(v.coords)
-        local x = coords.x
-        DebugCode("x:"..x)
-        local y = coords.y
-        DebugCode("y:"..y)
-        local z = coords.z
-        DebugCode("z:"..z)
-        local w = coords.w
-        DebugCode("w:"..w)
-        local prop = v.prop
-        DebugCode("prop:"..prop)
-        if BBQOUT[citizenid] == nil then
-            local obj = CreateObject(GetHashKey(prop), x,y,z,true, true, true)
-            while not DoesEntityExist(obj) do Wait(0) end
-            SetEntityHeading(obj, w)
-            local netId = NetworkGetNetworkIdFromEntity(obj)
-            BBQOUT[citizenid] = { netID = netId, entity = obj }
-            DebugCode("BBQ Created")
-            TriggerClientEvent('sayer-bbq:StartUpBBQs',-1,netId, citizenid, item)
-        else
-            local netId = BBQOUT[citizenid].netID
-            local entity = BBQOUT[citizenid].entity
-            TriggerClientEvent('sayer-bbq:SyncTargets',-1,netId,citizenid,item)
-        end
-    end
+RegisterNetEvent('sayer-bbq:AddBBQToDatabase', function(x, y, z, w, prop, item)
+    local Player = QBCore.Functions.GetPlayer(source)
+
+    local citizenid = Player.PlayerData.citizenid
+    DebugCode(tostring(citizenid))
+    local fuellimit = Config.Items[item].Fuel.MaxFuel
+    local fuel = {
+        Current = 0,
+        Max = fuellimit,
+    }
+    local Coords = {
+        x = x,
+        y = y,
+        z = z+1,
+        w = w,
+    }
+    MySQL.insert('INSERT INTO sayer_bbq (citizenid, prop, item, fuel, coords) VALUES (?, ?, ?, ?, ?)', {
+        citizenid,
+        prop,
+        item,
+        json.encode(fuel),
+        json.encode(Coords)
+    })
+
+    Player.Functions.RemoveItem(item,1)
+    BBQOUT[citizenid] = true
+    Wait(500)
+    TriggerEvent('sayer-bbq:RefreshModels')
 end)
+
+RegisterNetEvent('sayer-bbq:RefreshModels', function()
+    MySQL.rawExecute('SELECT * FROM sayer_bbq ', {}, function(result)
+        if result[1] then
+            local tempTrapCount = {}
+
+            for k, v in pairs(result) do
+                local cid = v.citizenid
+                local Coords = json.decode(v.coords)
+                local model = v.prop
+                local item = v.item
+                BBQOUT[cid] = true
+                TriggerClientEvent('sayer-bbq:CreateModelFromServer', -1, cid, Coords, model, item)
+            end
+        else
+            DebugCode("REFRESHBBQ: No bbqs found in the database.")
+        end
+    end)
+end)
+
 
 RegisterNetEvent('sayer-bbq:PickupBBQ', function(item,citizenid)
     local src = source
@@ -123,14 +128,12 @@ RegisterNetEvent('sayer-bbq:PickupBBQ', function(item,citizenid)
     MySQL.rawExecute('SELECT * FROM sayer_bbq WHERE citizenid = ?', { citizenid }, function(result)
         if result[1] then
             MySQL.query('DELETE FROM sayer_bbq WHERE citizenid = ?', { citizenid })
-            if BBQOUT[citizenid].entity ~= nil then
-                if DoesEntityExist(BBQOUT[citizenid].entity) then
-                    DeleteEntity(BBQOUT[citizenid].entity)
-                end
-            end
             Player.Functions.AddItem(item,1)
             SendNotify(src,"BBQ Picked Up")
             BBQOUT[citizenid] = nil
+            TriggerClientEvent('sayer-bbq:RemoveModel', -1, citizenid )
+            Wait(500)
+            TriggerEvent('sayer-bbq:RefreshModels')
         else
             DebugCode("BBQ Not Found")
         end
@@ -190,39 +193,6 @@ QBCore.Functions.CreateCallback('sayer-bbq:GetFuelLevel', function(source, cb, c
         end    
     end)
 end)
-
-QBCore.Functions.CreateCallback('sayer-bbq:PlaceDownBBQ', function(source, cb, x, y, z, w, prop, item)
-    local src = source
-    local Player = QBCore.Functions.GetPlayer(src)
-    local citizenid = Player.PlayerData.citizenid
-    DebugCode(tostring(citizenid))
-    local fuellimit = Config.Items[item].Fuel.MaxFuel
-    local fuel = {
-        Current = 0,
-        Max = fuellimit,
-    }
-    local Coords = {
-        x = x,
-        y = y,
-        z = z,
-        w = w,
-    }
-    MySQL.insert('INSERT INTO sayer_bbq (citizenid, prop, item, fuel, coords) VALUES (?, ?, ?, ?, ?)', {
-        citizenid,
-        prop,
-        item,
-        json.encode(fuel),
-        json.encode(Coords)
-    })
-    local obj = CreateObject(GetHashKey(prop), x,y,z,true, true, true)
-    while not DoesEntityExist(obj) do Wait(0) end
-    SetEntityHeading(obj, w)
-    local netId = NetworkGetNetworkIdFromEntity(obj)
-    BBQOUT[citizenid] = { netID = netId, entity = obj }
-    Player.Functions.RemoveItem(item,1)
-    cb(netId, citizenid)
-end)    
-
 ----Recipe Item Callbacks
 
 QBCore.Functions.CreateCallback('sayer-bbq:enoughIngredients', function(source, cb, Ingredients)
@@ -241,11 +211,4 @@ QBCore.Functions.CreateCallback('sayer-bbq:enoughIngredients', function(source, 
             return
         end
     end
-end)
-
-RegisterNetEvent('sayer-bbq:AddXP', function()
-    local src = source
-    local field = 'bbq'
-    local xp = 5
-    exports['sayer-reputation']:AddXP(src,field,xp)
 end)

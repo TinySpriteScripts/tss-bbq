@@ -2,15 +2,21 @@ local QBCore = exports['qb-core']:GetCoreObject()
 local PlayerData = {}
 local IsBusy = false
 local BBQTarget = {}
+local BBQModels = {}
 local BBQShop = {}
 local BBQShopBlip = {}
 local SharedItems = QBCore.Shared.Items
 
-AddEventHandler('onResourceStart', function(t) if t ~= GetCurrentResourceName() then return end
-    TriggerServerEvent('sayer-bbq:CheckForBBQs')
+AddEventHandler('onResourceStart', function(resource)
+    if resource ~= GetCurrentResourceName() then
+        return
+    end
+    TriggerServerEvent('sayer-bbq:RefreshModels')
 end)
-RegisterNetEvent('QBCore:Client:OnPlayerLoaded', function() 
-    TriggerServerEvent('sayer-bbq:CheckForBBQs') 
+
+RegisterNetEvent('QBCore:Client:OnPlayerLoaded')
+AddEventHandler('QBCore:Client:OnPlayerLoaded', function()
+    TriggerServerEvent('sayer-bbq:RefreshModels')
 end)
 
 AddEventHandler('onResourceStop', function(t) if t ~= GetCurrentResourceName() then return end
@@ -154,22 +160,7 @@ function PlaceBBQ(x,y,z,w,prop,item)
         local time = Config.Timings.PlaceBBQ
         ExecuteCommand("e "..emote)
         if ProgressBar("place_bbq", "Placing BBQ...", time) then
-            QBCore.Functions.TriggerCallback('sayer-bbq:PlaceDownBBQ', function(netId, citizenid)
-                if netId then
-                    success = true
-                    while not DoesEntityExist(NetToObj(netId)) do Wait(0) end
-                    local obj = NetToObj(netId)
-                    while obj == nil do Wait(0) end
-                    FreezeEntityPosition(obj, true)
-                    PlaceObjectOnGroundProperly(obj)
-                    local targetfinish = EnableBBQTarget(obj,item,citizenid)
-                    while not targetfinish do Wait(0) end
-                    DebugCode("Target Finished")
-                end
-            end, x, y, z, w, prop, item)
-            while not success do
-                Wait(0)
-            end
+            TriggerServerEvent('sayer-bbq:AddBBQToDatabase',x, y, z, w, prop, item )
             ClearPedTasks(ped)
         else
             ClearPedTasks(ped)
@@ -178,6 +169,76 @@ function PlaceBBQ(x,y,z,w,prop,item)
     else
         SendNotify('Youre Busy', 'error')
     end
+end
+
+RegisterNetEvent('sayer-bbq:CreateModelFromServer', function(cid, coords, model, item)
+    local x = coords.x
+    local y = coords.y
+    local z = coords.z
+    local w = coords.w
+    RequestModel(model)
+    while (not HasModelLoaded(model)) do
+        Wait(1)
+    end
+    
+    if BBQModels[cid] ~= nil then
+        DeleteEntity(BBQModels[cid])
+        while DoesEntityExist(BBQModels[cid]) do
+            Wait(1)
+        end
+    end
+    BBQModels[cid] = CreateObject(model, x, y, z - 1, false, false, true)
+    SetEntityHeading(BBQModels[cid], w)
+    PlaceObjectOnGroundProperly(BBQModels[cid])
+
+    AddTargetStuff(cid, BBQModels[cid], item)
+end)
+
+function AddTargetStuff(cid, trapentity, item)
+    if BBQTarget[cid] ~= nil then
+        exports['qb-target']:RemoveTargetEntity(BBQTarget[cid])
+    end
+    Wait(500)
+    BBQTarget[cid] = 
+    exports['qb-target']:AddTargetEntity(trapentity,{
+        options = {
+            {
+                action = function() 
+                    CookCats(cid) 
+                end,
+                icon = "fas fa-fire",
+                label = "Cook",
+            },
+            {
+                action = function() 
+                    Refuel(item, cid) 
+                end,
+                icon = "fas fa-water",
+                label = "Refuel",
+            },
+            {
+                action = function() 
+                    PickUpBBQ(item, cid) 
+                end,
+                icon = "fas fa-hand",
+                label = "Pick Up",
+                citizenid = cid,
+            },
+            {
+                action = function() 
+                    JobDeleteBBQ(item, cid) 
+                end,
+                canInteract = function()
+                    if GetDeleteJobAllowed() then
+                        return true
+                    end
+                end,
+                icon = "fas fa-hand",
+                label = "Remove BBQ",
+            },
+        },
+        distance = 2.5,
+    })
 end
 
 function PickUpBBQ(item,citizenid)
@@ -189,7 +250,7 @@ function PickUpBBQ(item,citizenid)
         if ProgressBar("pickup_bbq", "Picking Up BBQ...", time) then
             TriggerServerEvent('sayer-bbq:PickupBBQ', item, citizenid)
             ClearPedTasks(ped)
-            exports['qb-target']:RemoveTargetEntity(BBQTarget["BBQ"..citizenid])
+            exports['qb-target']:RemoveTargetEntity(BBQTarget[citizenid])
         else
             ClearPedTasks(ped)
             SendNotify("Canceled", "error")
@@ -199,82 +260,18 @@ function PickUpBBQ(item,citizenid)
     end
 end
 
-RegisterNetEvent('sayer-bbq:StartUpBBQs', function(netId, citizenid, item)
-    if netId then
-        DebugCode("Reached Client Side")
-        while not DoesEntityExist(NetToObj(netId)) do Wait(0) end
-        local obj = NetToObj(netId)
-        while obj == nil do Wait(0) end
-        FreezeEntityPosition(obj, true)
-        PlaceObjectOnGroundProperly(obj)
-        local targetfinish = EnableBBQTarget(obj,item,citizenid)
-        while not targetfinish do Wait(0) end
-        DebugCode("Target Finished")
+RegisterNetEvent('sayer-bbq:RemoveModel', function(cid)
+    DebugCode("REMOVEMODEL: cid: "..cid)
+    if BBQModels[cid] ~= nil then
+        DeleteEntity(BBQModels[cid])
+        DebugCode("REMOVEMODEL: Entity is deleted")
+    else
+        DebugCode("REMOVEMODEL: Entity not found")
+    end
+    if BBQTarget[cid] ~= nil then
+        exports['qb-target']:RemoveTargetEntity(BBQTarget[cid])
     end
 end)
-
-RegisterNetEvent('sayer-bbq:SyncTargets', function(netId, citizenid, item)
-    if netId then
-        DebugCode("Reached Sync Targets")
-        while not DoesEntityExist(NetToObj(netId)) do Wait(0) end
-        local obj = NetToObj(netId)
-        while obj == nil do Wait(0) end
-        FreezeEntityPosition(obj, true)
-        PlaceObjectOnGroundProperly(obj)
-        local targetfinish = EnableBBQTarget(obj,item,citizenid)
-        while not targetfinish do Wait(0) end
-        DebugCode("Target Finished")
-    end
-end)
-
-function EnableBBQTarget(obj,item,citizenid)
-    local retval = false
-    if obj ~= nil then
-        local table = Config.Items[Item]
-        BBQTarget["BBQ"..citizenid] = 
-        exports['qb-target']:AddTargetEntity(obj,{
-            options = {
-                {
-                    action = function() 
-                        CookCats(citizenid) 
-                    end,
-                    icon = "fas fa-fire",
-                    label = "Cook",
-                },
-                {
-                    action = function() 
-                        Refuel(item, citizenid) 
-                    end,
-                    icon = "fas fa-water",
-                    label = "Refuel",
-                },
-                {
-                    action = function() 
-                        PickUpBBQ(item, citizenid) 
-                    end,
-                    icon = "fas fa-hand",
-                    label = "Pick Up",
-                    citizenid = citizenid,
-                },
-                {
-                    action = function() 
-                        JobDeleteBBQ(item, citizenid) 
-                    end,
-                    canInteract = function()
-                        if GetDeleteJobAllowed() then
-                            return true
-                        end
-                    end,
-                    icon = "fas fa-hand",
-                    label = "Remove BBQ",
-                },
-            },
-            distance = 2.5,
-        })
-        retval = true
-    end
-    return retval
-end
 
 function JobDeleteBBQ(item,citizenid)
     TriggerServerEvent('sayer-bbq:PickupBBQ',item,citizenid)
@@ -404,7 +401,6 @@ function CookFood(item,fuel,citizenid,ingredients, time)
         for k, v in pairs(ingredients) do
             TriggerServerEvent('sayer-bbq:RemoveItem', v.item, v.amount)
         end
-        TriggerServerEvent('sayer-bbq:AddXP')
         TriggerEvent('animations:client:EmoteCommandStart', {"c"})
         ClearPedTasks(PlayerPedId())
         IsBusy = false

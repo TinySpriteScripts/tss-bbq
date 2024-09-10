@@ -4,7 +4,7 @@ lua54 'yes'
 
 author 'oosayeroo' 
 description 'sayer-bbq V2'
-version '2.0'
+version '2.1'
 
 shared_scripts {
     'config.lua'
